@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { addRoomChatMessage, clearRoomChat, getRoomChat } from "@/lib/chat-store";
+import { addRoomChatMessage, getRoomChat } from "@/lib/chat-store";
 import { getRoom } from "@/lib/store";
 import { makeId, sanitizeCode } from "@/lib/utils";
 
@@ -31,13 +31,6 @@ export async function POST(req: NextRequest) {
 
     const player = room.players.find((p) => p.id === playerId && p.token === token);
     if (!player) throw new Error("Session expirée ou invalide.");
-
-    // Le chat appartient à une partie, pas au lobby. Cela permet aussi de
-    // repartir avec un chat vide à chaque nouvelle partie.
-    if (room.status === "lobby") {
-      await clearRoomChat(code);
-      return NextResponse.json({ ok: true, status: room.status, messages: [] });
-    }
 
     if (action === "send") {
       const message = String(body.message ?? "").trim().replace(/\s+/g, " ").slice(0, 200);

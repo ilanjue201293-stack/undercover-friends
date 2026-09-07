@@ -10,13 +10,29 @@ declare global {
   var undercoverSchemaPromise: Promise<void> | undefined;
 }
 
+function normalizedConnectionString(rawUrl: string) {
+  // Vercel/Supabase can add sslmode to the generated URL. node-postgres may
+  // let that URI option override the explicit TLS config below, so remove it
+  // and configure TLS in one place.
+  try {
+    const url = new URL(rawUrl);
+    url.searchParams.delete("sslmode");
+    url.searchParams.delete("sslcert");
+    url.searchParams.delete("sslkey");
+    url.searchParams.delete("sslrootcert");
+    return url.toString();
+  } catch {
+    return rawUrl;
+  }
+}
+
 function pool() {
-  const url =
+  const rawUrl =
     process.env.POSTGRES_URL ||
     process.env.POSTGRES_PRISMA_URL ||
     process.env.POSTGRES_URL_NON_POOLING;
 
-  if (!url) {
+  if (!rawUrl) {
     throw new Error(
       "Supabase n'est pas configuré. Connecte ta base Supabase au projet Vercel pour obtenir POSTGRES_URL."
     );
@@ -24,7 +40,11 @@ function pool() {
 
   if (!globalThis.undercoverPool) {
     globalThis.undercoverPool = new Pool({
-      connectionString: url,
+      connectionString: normalizedConnectionString(rawUrl),
+      // Supabase/Vercel connections are encrypted, but the certificate chain
+      // presented by the managed connection can include a self-signed CA.
+      // Keep TLS enabled while accepting that managed certificate chain.
+      ssl: { rejectUnauthorized: false },
       max: 2,
       idleTimeoutMillis: 20_000,
       connectionTimeoutMillis: 10_000,

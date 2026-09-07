@@ -1,5 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import "./globals.css";
+import "./chat.css";
+import ChatOverlay from "./ChatOverlay";
 
 export const metadata: Metadata = {
   title: "Undercover",
@@ -15,7 +17,10 @@ export const viewport: Viewport = {
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
   return (
     <html lang="fr">
-      <body>{children}</body>
+      <body>
+        {children}
+        <ChatOverlay />
+      </body>
     </html>
   );
 }

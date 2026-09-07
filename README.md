@@ -2,18 +2,16 @@
 
 Jeu multijoueur privé : rooms par code, Imposteur / Mr White, indices, votes secrets, départages, présence et spectateurs.
 
-## Déploiement Vercel
+## Déploiement Vercel avec Supabase
 
 1. Sur Vercel : **Add New → Project** puis importe ce repo.
-2. Ajoute une base **Upstash Redis** depuis le Marketplace Vercel et connecte-la au projet.
-3. Vérifie que Vercel a créé :
-   - `UPSTASH_REDIS_REST_URL`
-   - `UPSTASH_REDIS_REST_TOKEN`
-4. Redéploie le projet.
+2. Connecte au projet la base **Supabase** que tu utilises déjà dans Vercel.
+3. Vérifie dans **Settings → Environment Variables** que `POSTGRES_URL` existe.
+4. Redéploie le projet si tu viens juste de connecter la base.
 
-Le site accepte aussi les anciens noms `KV_REST_API_URL` et `KV_REST_API_TOKEN`.
+L'intégration Supabase de Vercel ajoute normalement automatiquement `POSTGRES_URL` et les autres variables de connexion.
 
-Aucune table SQL, aucun compte utilisateur et aucune migration ne sont nécessaires.
+**Aucun SQL à copier manuellement :** au premier lancement, le site crée automatiquement la table `undercover_rooms` et son index. Les rooms expirent après 12 h d'inactivité.
 
 ## Règles implémentées
 
@@ -40,7 +38,7 @@ Aucune table SQL, aucun compte utilisateur et aucune migration ne sont nécessai
 
 ## Local (optionnel)
 
-Copie `.env.example` vers `.env.local`, ajoute les deux variables Upstash puis :
+Copie `.env.example` vers `.env.local`, mets une URL Postgres Supabase dans `POSTGRES_URL`, puis :
 
 ```bash
 npm install

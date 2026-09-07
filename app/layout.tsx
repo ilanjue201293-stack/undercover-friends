@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from "next";
 import "./globals.css";
 import "./chat.css";
 import ChatOverlay from "./ChatOverlay";
+import LobbyChatOverlay from "./LobbyChatOverlay";
 
 export const metadata: Metadata = {
   title: "Undercover",
@@ -19,6 +20,7 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
     <html lang="fr">
       <body>
         {children}
+        <LobbyChatOverlay />
         <ChatOverlay />
       </body>
     </html>

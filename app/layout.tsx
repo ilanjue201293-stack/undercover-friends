@@ -1,12 +1,11 @@
 import type { Metadata, Viewport } from "next";
 import "./globals.css";
 import "./chat.css";
-import ChatOverlay from "./ChatOverlay";
-import LobbyChatOverlay from "./LobbyChatOverlay";
+import RoomCommsPersistent from "./RoomCommsPersistent";
 
 export const metadata: Metadata = {
   title: "Undercover",
-  description: "Undercover entre potes — rooms privées, indices et votes.",
+  description: "Undercover entre potes — rooms publiques, privées, indices et votes.",
 };
 
 export const viewport: Viewport = {
@@ -20,8 +19,7 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
     <html lang="fr">
       <body>
         {children}
-        <LobbyChatOverlay />
-        <ChatOverlay />
+        <RoomCommsPersistent />
       </body>
     </html>
   );

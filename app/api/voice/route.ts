@@ -29,11 +29,8 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ ok: true });
     }
 
-    if (room.status === "lobby") {
-      await leaveVoice(code, player.id);
-      return NextResponse.json({ ok: true, status: room.status, participants: [], signals: [], cursor: 0 });
-    }
-
+    // Le vocal appartient à la ROOM, pas à une manche : lobby, partie et fin de partie
+    // utilisent exactement la même présence et les mêmes connexions WebRTC.
     if (action === "state") {
       return NextResponse.json({ ok: true, status: room.status, participants: await listVoiceParticipants(code), signals: [], cursor: 0 });
     }

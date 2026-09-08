@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import "./globals.css";
 import "./chat.css";
+import "./upgrades.css";
 import RoomCommsPersistent from "./RoomCommsPersistent";
 
 export const metadata: Metadata = {

@@ -1,0 +1,58 @@
+name: Apply empty-room cleanup
+permissions:
+  contents: write
+on:
+  push:
+    paths: ['.github/workflows/cleanup-empty-rooms.yml']
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Patch empty room behavior
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          route = Path('app/api/room/route.ts')
+          text = route.read_text()
+          old = '''      if (action === "leaveSignal") {\n        player.leaveSignaledAt = Date.now();\n        return { ok: true };\n      }'''
+          new = '''      if (action === "leaveSignal") {\n        // pagehide signifie que le joueur a réellement quitté la room.\n        // On le marque hors ligne immédiatement pour que la dernière personne\n        // puisse faire disparaître la room sans attendre le TTL.\n        player.leaveSignaledAt = Date.now();\n        player.connected = false;\n        return { ok: true };\n      }'''
+          if old not in text:
+              raise SystemExit('leaveSignal pattern not found')
+          route.write_text(text.replace(old, new))
+
+          store = Path('lib/store.ts')
+          text = store.read_text()
+          old = '''    const callbackResult = await fn(room);\n    room.updatedAt = Date.now();\n    await client.query(\n      `update undercover_rooms set state=$1::jsonb,updated_at=now(),expires_at=$2 where code=$3`,\n      [JSON.stringify(room), expiryDate(), code]\n    );\n    return callbackResult;'''
+          new = '''    const callbackResult = await fn(room);\n\n    // Dès qu'il ne reste réellement plus personne dans une room, on supprime\n    // la ligne entière. Elle disparaît donc du code, de la liste publique,\n    // du chat et du vocal au lieu de survivre jusqu'au TTL de 12 h.\n    if (room.players.length > 0 && !room.players.some((player) => player.connected)) {\n      await client.query(`delete from undercover_rooms where code=$1`, [code]);\n      return callbackResult;\n    }\n\n    room.updatedAt = Date.now();\n    await client.query(\n      `update undercover_rooms set state=$1::jsonb,updated_at=now(),expires_at=$2 where code=$3`,\n      [JSON.stringify(room), expiryDate(), code]\n    );\n    return callbackResult;'''
+          if old not in text:
+              raise SystemExit('withRoomLock pattern not found')
+          text = text.replace(old, new)
+
+          old = '''       and coalesce(state->>'access','code')='public'\n       and state->>'status'='lobby'\n     order by updated_at desc'''
+          new = '''       and coalesce(state->>'access','code')='public'\n       and state->>'status'='lobby'\n       and exists (\n         select 1\n         from jsonb_array_elements(coalesce(state->'players','[]'::jsonb)) as player\n         where coalesce((player->>'connected')::boolean,false)=true\n           and coalesce((player->>'lastSeen')::bigint,0) > (extract(epoch from now())*1000 - 20000)\n       )\n     order by updated_at desc'''
+          if old not in text:
+              raise SystemExit('public rooms query pattern not found')
+          store.write_text(text.replace(old, new))
+          PY
+      - run: npm install
+      - run: npm run typecheck
+      - name: Commit patch
+        run: |
+          git config user.name "Retro updater"
+          git config user.email "actions@users.noreply.github.com"
+          git add app/api/room/route.ts lib/store.ts
+          git commit -m "Delete empty Undercover rooms immediately"
+          git push origin main
+      - name: Remove temporary workflow
+        run: |
+          git pull --rebase origin main
+          git rm .github/workflows/cleanup-empty-rooms.yml
+          git commit -m "Remove empty-room migration workflow"
+          git push origin main

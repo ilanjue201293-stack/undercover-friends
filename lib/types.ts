@@ -1,6 +1,7 @@
 export type GameMode = "impostor" | "mrwhite";
 export type Role = "civil" | "infiltrator";
 export type RoomStatus = "lobby" | "playing" | "gameover";
+export type RoomAccess = "public" | "code" | "private";
 export type GamePhase =
   | "reveal"
   | "clue"
@@ -13,7 +14,9 @@ export type GamePhase =
 export type Settings = {
   mode: GameMode;
   roundsBeforeVote: number;
-  actionTimeSec: number;
+  clueTimeSec: number;
+  voteTimeSec: number;
+  actionTimeSec?: number;
   keepCluesAfterVote: boolean;
   infiltratorsKnowEachOther: boolean;
   impostorKnowsRole: boolean;
@@ -37,6 +40,16 @@ export type Player = {
   role: Role | null;
   word: string | null;
   revealAck: boolean;
+};
+
+export type JoinRequest = {
+  id: string;
+  requestToken: string;
+  name: string;
+  createdAt: number;
+  status: "pending" | "accepted" | "rejected";
+  playerId?: string;
+  playerToken?: string;
 };
 
 export type Clue = {
@@ -81,6 +94,7 @@ export type GameState = {
   pendingMrWhiteId: string | null;
   civilianWord: string;
   infiltratorWord: string | null;
+  wordTheme?: string;
   infiltratorCountInitial: number;
   lastVoteReveal: VoteReveal | null;
   winner: "civilians" | "infiltrators" | null;
@@ -94,6 +108,8 @@ export type Room = {
   status: RoomStatus;
   hostId: string;
   nextJoinOrder: number;
+  access?: RoomAccess;
+  joinRequests?: JoinRequest[];
   settings: Settings;
   players: Player[];
   game: GameState | null;

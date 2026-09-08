@@ -184,6 +184,14 @@ export async function POST(req: NextRequest) {
         applySettings(room, body.settings ?? {});
         resetReady(room);
         addEvent(room, "Les réglages ont changé : tout le monde repasse en Pas prêt.", "info");
+      } else if (action === "transferHost") {
+        if (room.hostId !== player.id) throw new Error("Seul l'hôte peut transférer le rôle d'hôte.");
+        const targetId = String(body.targetId ?? "");
+        const target = room.players.find((candidate) => candidate.id === targetId);
+        if (!target || target.id === player.id) throw new Error("Choisis un autre joueur.");
+        if (!target.connected) throw new Error("Ce joueur doit être en ligne pour devenir hôte.");
+        room.hostId = target.id;
+        addEvent(room, `${player.name} a transféré le rôle d'hôte à ${target.name}.`, "info");
       } else if (action === "acceptJoinRequest") {
         if (room.hostId !== player.id) throw new Error("Seul l'hôte peut accepter les demandes.");
         const request = room.joinRequests.find((item) => item.id === String(body.requestId ?? ""));

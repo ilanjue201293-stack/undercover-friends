@@ -180,7 +180,7 @@ export default function RoomCommsPersistent() {
       finally { inFlight = false; }
     };
     void poll();
-    const id = window.setInterval(() => void poll(), 1000);
+    const id = window.setInterval(() => void poll(), 1600);
     return () => { alive = false; window.clearInterval(id); };
   }, [session?.code, session?.playerId]);
 
@@ -319,7 +319,7 @@ export default function RoomCommsPersistent() {
       catch { if (alive) setParticipants([]); }
       finally { inFlight = false; }
     };
-    void peek(); const id = window.setInterval(() => void peek(), 1800);
+    void peek(); const id = window.setInterval(() => void peek(), 3000);
     return () => { alive = false; window.clearInterval(id); };
   }, [session?.code, session?.playerId, voiceJoined]);
 
@@ -339,7 +339,7 @@ export default function RoomCommsPersistent() {
       } catch (e) { if (alive) setVoiceError(e instanceof Error ? e.message : "Connexion vocale instable."); }
       finally { inFlight = false; }
     };
-    void poll(); const id = window.setInterval(() => void poll(), 750);
+    void poll(); const id = window.setInterval(() => void poll(), 1000);
     return () => { alive = false; window.clearInterval(id); };
   }, [session?.code, session?.playerId, voiceJoined]);
 

@@ -165,7 +165,7 @@ export default function Home() {
       finally { running = false; }
     };
     void poll();
-    const id = window.setInterval(() => void poll(), 2500);
+    const id = window.setInterval(() => void poll(), 5000);
     return () => { alive = false; window.clearInterval(id); };
   }, [session, pending]);
 
@@ -200,7 +200,7 @@ export default function Home() {
       } finally { running = false; }
     };
     void poll();
-    const id = window.setInterval(() => void poll(), 850);
+    const id = window.setInterval(() => void poll(), 1500);
     return () => { alive = false; window.clearInterval(id); };
   }, [pending, session]);
 
@@ -226,7 +226,7 @@ export default function Home() {
       } finally { polling = false; }
     };
     void poll();
-    const id = window.setInterval(() => void poll(), 1000);
+    const id = window.setInterval(() => void poll(), 1400);
     const onVisible = () => { if (document.visibilityState === "visible") void poll(); };
     document.addEventListener("visibilitychange", onVisible);
     const onPageHide = () => {
@@ -423,6 +423,7 @@ function Lobby({ state, busy, perform }: { state: PublicState; busy: boolean; pe
         {[...state.players].sort((a,b) => a.joinOrder-b.joinOrder).map((p) => <div className={`playerCard ${!p.connected ? "offline" : ""}`} key={p.id}>
           <div className="avatar">{p.name.slice(0,1).toUpperCase()}</div>
           <div className="playerInfo"><strong>{p.name}{p.id === state.me.id ? " (toi)" : ""}</strong><span>{p.id === state.hostId ? "Hôte" : p.connected ? (p.ready ? "Prêt" : "Pas prêt") : "Hors ligne"}</span></div>
+          {state.me.isHost && p.id !== state.me.id && p.connected && <button className="transferHostButton" disabled={busy} onClick={() => { if (window.confirm(`Donner le rôle d'hôte à ${p.name} ?`)) void perform("transferHost", { targetId: p.id }); }}>Donner l'hôte</button>}
           <div className={`statusDot ${p.connected && p.ready ? "ready" : p.connected ? "online" : ""}`}/>
         </div>)}
       </div>

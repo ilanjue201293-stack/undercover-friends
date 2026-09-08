@@ -163,7 +163,11 @@ export async function POST(req: NextRequest) {
       room.access ??= "code"; room.joinRequests ??= []; pruneJoinRequests(room);
 
       if (action === "leaveSignal") {
+        // pagehide signifie que le joueur a réellement quitté la room.
+        // On le marque hors ligne immédiatement pour que la dernière personne
+        // puisse faire disparaître la room sans attendre le TTL.
         player.leaveSignaledAt = Date.now();
+        player.connected = false;
         return { ok: true };
       }
 

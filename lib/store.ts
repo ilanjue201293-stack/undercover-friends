@@ -99,6 +99,12 @@ export async function listPublicRooms(): Promise<PublicRoomSummary[]> {
      where expires_at>now()
        and coalesce(state->>'access','code')='public'
        and state->>'status'='lobby'
+       and exists (
+         select 1
+         from jsonb_array_elements(coalesce(state->'players','[]'::jsonb)) as player
+         where coalesce((player->>'connected')::boolean,false)=true
+           and coalesce((player->>'lastSeen')::bigint,0) > (extract(epoch from now())*1000 - 20000)
+       )
      order by updated_at desc
      limit 40`
   );
@@ -160,6 +166,15 @@ export async function withRoomLock<T>(code: string, fn: (room: Room) => Promise<
     room.settings.clueTimeSec = Number.isFinite(room.settings.clueTimeSec) ? room.settings.clueTimeSec : room.settings.actionTimeSec ?? 30;
     room.settings.voteTimeSec = Number.isFinite(room.settings.voteTimeSec) ? room.settings.voteTimeSec : room.settings.actionTimeSec ?? 30;
     const callbackResult = await fn(room);
+
+    // Dès qu'il ne reste réellement plus personne dans une room, on supprime
+    // la ligne entière. Elle disparaît donc du code, de la liste publique,
+    // du chat et du vocal au lieu de survivre jusqu'au TTL de 12 h.
+    if (room.players.length > 0 && !room.players.some((player) => player.connected)) {
+      await client.query(`delete from undercover_rooms where code=$1`, [code]);
+      return callbackResult;
+    }
+
     room.updatedAt = Date.now();
     await client.query(
       `update undercover_rooms set state=$1::jsonb,updated_at=now(),expires_at=$2 where code=$3`,

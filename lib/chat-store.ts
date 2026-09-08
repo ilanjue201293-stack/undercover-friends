@@ -1,4 +1,4 @@
-import { Pool } from "pg";
+import { db } from "./db";
 
 export type ChatMessage = {
   id: string;
@@ -11,52 +11,16 @@ export type ChatMessage = {
 
 declare global {
   // eslint-disable-next-line no-var
-  var undercoverChatPool: Pool | undefined;
-  // eslint-disable-next-line no-var
   var undercoverChatSchemaPromise: Promise<void> | undefined;
-}
-
-function normalizedConnectionString(rawUrl: string) {
-  try {
-    const url = new URL(rawUrl);
-    url.searchParams.delete("sslmode");
-    url.searchParams.delete("sslcert");
-    url.searchParams.delete("sslkey");
-    url.searchParams.delete("sslrootcert");
-    return url.toString();
-  } catch {
-    return rawUrl;
-  }
-}
-
-function pool() {
-  const rawUrl =
-    process.env.POSTGRES_URL ||
-    process.env.POSTGRES_PRISMA_URL ||
-    process.env.POSTGRES_URL_NON_POOLING;
-
-  if (!rawUrl) {
-    throw new Error("Supabase n'est pas configuré.");
-  }
-
-  if (!globalThis.undercoverChatPool) {
-    globalThis.undercoverChatPool = new Pool({
-      connectionString: normalizedConnectionString(rawUrl),
-      ssl: { rejectUnauthorized: false },
-      max: 1,
-      idleTimeoutMillis: 20_000,
-      connectionTimeoutMillis: 10_000,
-    });
-  }
-
-  return globalThis.undercoverChatPool;
+  // eslint-disable-next-line no-var
+  var undercoverChatLastCleanup: number | undefined;
 }
 
 async function ensureSchema() {
   if (!globalThis.undercoverChatSchemaPromise) {
     globalThis.undercoverChatSchemaPromise = (async () => {
-      const db = pool();
-      await db.query(`
+      const database = db();
+      await database.query(`
         create table if not exists undercover_chat_messages (
           id text primary key,
           room_code text not null,
@@ -66,7 +30,7 @@ async function ensureSchema() {
           created_at timestamptz not null default now()
         )
       `);
-      await db.query(`
+      await database.query(`
         create index if not exists undercover_chat_room_created_idx
         on undercover_chat_messages (room_code, created_at)
       `);
@@ -79,18 +43,21 @@ async function ensureSchema() {
   await globalThis.undercoverChatSchemaPromise;
 }
 
-async function cleanupOldMessages() {
-  await pool().query(`
+async function cleanupOldMessagesIfNeeded() {
+  const now = Date.now();
+  if (now - (globalThis.undercoverChatLastCleanup ?? 0) < 60_000) return;
+  globalThis.undercoverChatLastCleanup = now;
+  await db().query(`
     delete from undercover_chat_messages
     where created_at < now() - interval '12 hours'
-  `);
+  `).catch(() => undefined);
 }
 
 export async function getRoomChat(roomCode: string): Promise<ChatMessage[]> {
   await ensureSchema();
-  await cleanupOldMessages();
+  void cleanupOldMessagesIfNeeded();
 
-  const result = await pool().query<{
+  const result = await db().query<{
     id: string;
     room_code: string;
     player_id: string;
@@ -125,7 +92,7 @@ export async function addRoomChatMessage(input: {
   text: string;
 }) {
   await ensureSchema();
-  await pool().query(
+  await db().query(
     `insert into undercover_chat_messages (id, room_code, player_id, player_name, message)
      values ($1, $2, $3, $4, $5)`,
     [input.id, input.roomCode, input.playerId, input.playerName, input.text]
@@ -134,5 +101,5 @@ export async function addRoomChatMessage(input: {
 
 export async function clearRoomChat(roomCode: string) {
   await ensureSchema();
-  await pool().query(`delete from undercover_chat_messages where room_code = $1`, [roomCode]);
+  await db().query(`delete from undercover_chat_messages where room_code = $1`, [roomCode]);
 }

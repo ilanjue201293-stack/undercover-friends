@@ -1,4 +1,5 @@
-import { Pool, type PoolClient } from "pg";
+import type { PoolClient } from "pg";
+import { db } from "./db";
 import type { Room } from "./types";
 
 const ROOM_TTL_MS = 12 * 60 * 60 * 1000;
@@ -14,42 +15,14 @@ export type PublicRoomSummary = {
 
 declare global {
   // eslint-disable-next-line no-var
-  var undercoverPool: Pool | undefined;
-  // eslint-disable-next-line no-var
   var undercoverSchemaPromise: Promise<void> | undefined;
-}
-
-function normalizedConnectionString(rawUrl: string) {
-  try {
-    const url = new URL(rawUrl);
-    url.searchParams.delete("sslmode");
-    url.searchParams.delete("sslcert");
-    url.searchParams.delete("sslkey");
-    url.searchParams.delete("sslrootcert");
-    return url.toString();
-  } catch { return rawUrl; }
-}
-
-function pool() {
-  const rawUrl = process.env.POSTGRES_URL || process.env.POSTGRES_PRISMA_URL || process.env.POSTGRES_URL_NON_POOLING;
-  if (!rawUrl) throw new Error("Supabase n'est pas configuré. Connecte ta base Supabase au projet Vercel pour obtenir POSTGRES_URL.");
-  if (!globalThis.undercoverPool) {
-    globalThis.undercoverPool = new Pool({
-      connectionString: normalizedConnectionString(rawUrl),
-      ssl: { rejectUnauthorized: false },
-      max: 2,
-      idleTimeoutMillis: 20_000,
-      connectionTimeoutMillis: 10_000,
-    });
-  }
-  return globalThis.undercoverPool;
 }
 
 async function ensureSchema() {
   if (!globalThis.undercoverSchemaPromise) {
     globalThis.undercoverSchemaPromise = (async () => {
-      const db = pool();
-      await db.query(`
+      const database = db();
+      await database.query(`
         create table if not exists undercover_rooms (
           code text primary key,
           state jsonb not null,
@@ -57,7 +30,7 @@ async function ensureSchema() {
           expires_at timestamptz not null
         )
       `);
-      await db.query(`create index if not exists undercover_rooms_expires_at_idx on undercover_rooms (expires_at)`);
+      await database.query(`create index if not exists undercover_rooms_expires_at_idx on undercover_rooms (expires_at)`);
     })().catch((error) => { globalThis.undercoverSchemaPromise = undefined; throw error; });
   }
   await globalThis.undercoverSchemaPromise;
@@ -66,7 +39,7 @@ async function ensureSchema() {
 function expiryDate() { return new Date(Date.now() + ROOM_TTL_MS); }
 
 async function inTransaction<T>(fn: (client: PoolClient) => Promise<T>): Promise<T> {
-  const client = await pool().connect();
+  const client = await db().connect();
   try {
     await client.query("begin");
     const result = await fn(client);
@@ -80,12 +53,12 @@ async function inTransaction<T>(fn: (client: PoolClient) => Promise<T>): Promise
 
 export async function getRoom(code: string): Promise<Room | null> {
   await ensureSchema();
-  const db = pool();
-  const result = await db.query<{ state: Room }>(
+  const database = db();
+  const result = await database.query<{ state: Room }>(
     `select state from undercover_rooms where code=$1 and expires_at>now() limit 1`, [code]
   );
   if (result.rowCount === 0) {
-    await db.query(`delete from undercover_rooms where code=$1 and expires_at<=now()`, [code]);
+    await database.query(`delete from undercover_rooms where code=$1 and expires_at<=now()`, [code]);
     return null;
   }
   return result.rows[0].state;
@@ -93,7 +66,7 @@ export async function getRoom(code: string): Promise<Room | null> {
 
 export async function listPublicRooms(): Promise<PublicRoomSummary[]> {
   await ensureSchema();
-  const result = await pool().query<{ state: Room }>(
+  const result = await db().query<{ state: Room }>(
     `select state
      from undercover_rooms
      where expires_at>now()
@@ -124,9 +97,9 @@ export async function listPublicRooms(): Promise<PublicRoomSummary[]> {
 
 export async function saveRoom(room: Room) {
   await ensureSchema();
-  const db = pool();
+  const database = db();
   room.updatedAt = Date.now();
-  await db.query(
+  await database.query(
     `insert into undercover_rooms (code,state,updated_at,expires_at)
      values ($1,$2::jsonb,now(),$3)
      on conflict (code) do update set state=excluded.state,updated_at=excluded.updated_at,expires_at=excluded.expires_at`,
@@ -167,9 +140,6 @@ export async function withRoomLock<T>(code: string, fn: (room: Room) => Promise<
     room.settings.voteTimeSec = Number.isFinite(room.settings.voteTimeSec) ? room.settings.voteTimeSec : room.settings.actionTimeSec ?? 30;
     const callbackResult = await fn(room);
 
-    // Dès qu'il ne reste réellement plus personne dans une room, on supprime
-    // la ligne entière. Elle disparaît donc du code, de la liste publique,
-    // du chat et du vocal au lieu de survivre jusqu'au TTL de 12 h.
     if (room.players.length > 0 && !room.players.some((player) => player.connected)) {
       await client.query(`delete from undercover_rooms where code=$1`, [code]);
       return callbackResult;

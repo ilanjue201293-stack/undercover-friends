@@ -1,0 +1,173 @@
+import type { UnoCard, UnoColor, UnoGame, UnoPlayer, UnoRoom } from "./uno-types";
+import { makeId, shuffle } from "./utils";
+
+const COLORS: Exclude<UnoColor, null>[] = ["red", "yellow", "green", "blue"];
+const VALUES: UnoCard["value"][] = ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "skip", "reverse", "draw2"];
+const now = () => Date.now();
+
+export function addUnoMessage(room: UnoRoom, player: UnoPlayer, text: string) {
+  const clean = text.trim().replace(/\s+/g, " ").slice(0, 180);
+  if (!clean) throw new Error("Écris un message.");
+  room.messages.push({ id: makeId(), playerId: player.id, playerName: player.name, text: clean, at: now() });
+  if (room.messages.length > 120) room.messages.splice(0, room.messages.length - 120);
+}
+
+function buildDeck(): UnoCard[] {
+  const cards: UnoCard[] = [];
+  for (const color of COLORS) {
+    cards.push({ id: makeId(), color, value: "0" });
+    for (let copy = 0; copy < 2; copy++) {
+      for (const value of VALUES.slice(1)) cards.push({ id: makeId(), color, value });
+    }
+  }
+  for (let copy = 0; copy < 4; copy++) {
+    cards.push({ id: makeId(), color: null, value: "wild" }, { id: makeId(), color: null, value: "wild4" });
+  }
+  return shuffle(cards);
+}
+
+function nextPlayer(room: UnoRoom, fromId: string, steps = 1) {
+  const players = room.players.filter((p) => p.connected);
+  let index = players.findIndex((p) => p.id === fromId);
+  if (index < 0 || players.length === 0) return null;
+  for (let i = 0; i < steps; i++) index = (index + (room.game?.direction ?? 1) + players.length) % players.length;
+  return players[index]?.id ?? null;
+}
+
+function reshuffleIfNeeded(game: UnoGame) {
+  if (game.deck.length > 0 || game.discard.length <= 1) return;
+  const top = game.discard[game.discard.length - 1];
+  game.deck = shuffle(game.discard.slice(0, -1).map((c) => ({ ...c, id: makeId() })));
+  game.discard = [top];
+}
+
+export function canPlay(card: UnoCard, game: UnoGame) {
+  const top = game.discard[game.discard.length - 1];
+  if (!top) return true;
+  const activeColor = game.chosenColor ?? top.color;
+  if (card.value === "wild" || card.value === "wild4") return true;
+  return card.color === activeColor || card.value === top.value;
+}
+
+function drawCards(game: UnoGame, count: number) {
+  const result: UnoCard[] = [];
+  for (let i = 0; i < count; i++) {
+    reshuffleIfNeeded(game);
+    const card = game.deck.pop();
+    if (!card) break;
+    result.push(card);
+  }
+  return result;
+}
+
+export function startUnoGame(room: UnoRoom) {
+  const players = room.players.filter((p) => p.connected);
+  if (players.length < 2) throw new Error("Il faut au moins 2 joueurs connectés.");
+  if (players.some((p) => !p.ready)) throw new Error("Tous les joueurs doivent être prêts.");
+  const deck = buildDeck();
+  for (const player of players) player.hand = [];
+  for (let i = 0; i < 7; i++) for (const player of players) player.hand.push(deck.pop()!);
+  let first = deck.pop()!;
+  while (first.value === "wild4" || first.value === "wild") { deck.unshift(first); first = deck.pop()!; }
+  const game: UnoGame = {
+    phase: "playing", deck, discard: [first], currentPlayerId: players[0].id, direction: 1,
+    chosenColor: null, pendingWild4: false, unoCalledBy: null, winnerId: null, startedAt: now(),
+  };
+  room.game = game; room.status = "playing";
+  const special = first.value === "skip" || first.value === "reverse" || first.value === "draw2";
+  if (first.value === "reverse" && players.length > 2) game.direction = -1;
+  if (special && first.value === "skip") game.currentPlayerId = nextPlayer(room, game.currentPlayerId) ?? game.currentPlayerId;
+  if (first.value === "draw2") {
+    const target = players.find((p) => p.id === nextPlayer(room, players[0].id));
+    if (target) target.hand.push(...drawCards(game, 2));
+    game.currentPlayerId = target?.id ?? players[0].id;
+  }
+  room.messages.push({ id: makeId(), playerId: room.hostId, playerName: "UNO", text: "La partie commence !", at: now() });
+}
+
+export function callUno(room: UnoRoom, player: UnoPlayer) {
+  if (!room.game || room.game.phase !== "playing") throw new Error("La partie n'est pas en cours.");
+  if (player.hand.length !== 1) throw new Error("Tu peux annoncer UNO uniquement avec une carte restante.");
+  room.game.unoCalledBy = player.id;
+}
+
+export function chooseUnoColor(room: UnoRoom, player: UnoPlayer, color: Exclude<UnoColor, null>) {
+  const game = room.game;
+  if (!game || game.phase !== "playing" || game.currentPlayerId !== player.id) throw new Error("Ce n'est pas ton tour.");
+  if (!game.chosenColor && !game.pendingWild4) throw new Error("Aucune couleur n'est à choisir.");
+  if (!COLORS.includes(color)) throw new Error("Couleur invalide.");
+  game.chosenColor = color;
+  game.pendingWild4 = false;
+  game.currentPlayerId = nextPlayer(room, player.id) ?? player.id;
+}
+
+export function drawUno(room: UnoRoom, player: UnoPlayer) {
+  const game = room.game;
+  if (!game || game.phase !== "playing" || game.currentPlayerId !== player.id) throw new Error("Ce n'est pas ton tour.");
+  const cards = drawCards(game, 1);
+  if (cards[0]) {
+    player.hand.push(cards[0]);
+    if (!canPlay(cards[0], game)) game.currentPlayerId = nextPlayer(room, player.id) ?? player.id;
+  } else game.currentPlayerId = nextPlayer(room, player.id) ?? player.id;
+}
+
+export function playUnoCard(room: UnoRoom, player: UnoPlayer, cardId: string) {
+  const game = room.game;
+  if (!game || game.phase !== "playing") throw new Error("La partie n'est pas en cours.");
+  if (game.currentPlayerId !== player.id) throw new Error("Ce n'est pas ton tour.");
+  const index = player.hand.findIndex((c) => c.id === cardId);
+  if (index < 0) throw new Error("Carte introuvable.");
+  const card = player.hand[index];
+  if (!canPlay(card, game)) throw new Error("Cette carte ne peut pas être jouée maintenant.");
+  if (card.value === "wild4") {
+    const top = game.discard[game.discard.length - 1];
+    const hasMatchingColor = player.hand.some((c, i) => i !== index && c.color === (game.chosenColor ?? top?.color) && c.value !== "wild" && c.value !== "wild4");
+    if (hasMatchingColor) throw new Error("Tu ne peux jouer +4 que si tu n'as pas de carte de la couleur active.");
+  }
+  player.hand.splice(index, 1);
+  game.discard.push(card);
+  game.chosenColor = null;
+  game.unoCalledBy = player.hand.length === 1 && game.unoCalledBy === player.id ? player.id : null;
+  if (player.hand.length === 0) {
+    game.phase = "gameover"; game.winnerId = player.id; room.status = "gameover"; return;
+  }
+  if (player.hand.length === 1 && game.unoCalledBy !== player.id) throw new Error("Annonce UNO avant de jouer ta prochaine carte.");
+
+  if (card.value === "reverse") game.direction = room.players.filter((p) => p.connected).length === 2 ? 1 : (game.direction * -1) as 1 | -1;
+  if (card.value === "skip") game.currentPlayerId = nextPlayer(room, player.id, 2) ?? player.id;
+  else if (card.value === "draw2") {
+    const target = room.players.find((p) => p.id === nextPlayer(room, player.id));
+    if (target) target.hand.push(...drawCards(game, 2));
+    game.currentPlayerId = target?.id ? nextPlayer(room, target.id) ?? target.id : player.id;
+  } else if (card.value === "wild" || card.value === "wild4") {
+    game.pendingWild4 = card.value === "wild4";
+    game.chosenColor = null;
+    if (!game.pendingWild4) game.currentPlayerId = player.id;
+  } else game.currentPlayerId = nextPlayer(room, player.id) ?? player.id;
+}
+
+export function tickUno(room: UnoRoom) {
+  for (const player of room.players) {
+    if (player.connected && now() - player.lastSeen > 12000) player.connected = false;
+  }
+  if (room.game?.phase === "playing" && !room.players.some((p) => p.id === room.game!.currentPlayerId && p.connected)) {
+    room.game.currentPlayerId = nextPlayer(room, room.game.currentPlayerId) ?? room.game.currentPlayerId;
+  }
+  if (room.hostId && !room.players.find((p) => p.id === room.hostId && p.connected)) {
+    const next = room.players.filter((p) => p.connected).sort((a, b) => a.joinOrder - b.joinOrder)[0];
+    if (next) room.hostId = next.id;
+  }
+}
+
+export function publicUnoState(room: UnoRoom, me: UnoPlayer) {
+  const game = room.game;
+  return {
+    code: room.code, status: room.status, access: room.access, hostId: room.hostId,
+    players: room.players.map((p) => ({ id: p.id, name: p.name, ready: p.ready, connected: p.connected, cards: p.hand.length })),
+    me: { id: me.id, name: me.name, isHost: me.id === room.hostId, ready: me.ready, hand: me.hand, connected: me.connected },
+    game: game ? { ...game, deck: undefined, hands: undefined } : null,
+    topCard: game?.discard[game.discard.length - 1] ?? null,
+    messages: room.messages.slice(-50),
+    serverNow: now(),
+  };
+}
